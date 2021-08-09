@@ -1,0 +1,311 @@
+---
+title: "Drivers_of_Violence.Rmd"
+author: "Weston McCool"
+date: "7/7/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+### Packages and Dataframes
+
+```{r setup, include=T}
+library(rcarbon)
+library(funModeling)
+library(mgcv)
+library(RColorBrewer)
+library(ggplot2)
+# Dataframes 
+C14AgeSD_All<-read.csv("./Dataframes/SPD DFs/everyone_SPD.csv") # all C14 dates for SPD
+C14all<-read.csv("./Weighted mean DF and models/unweighted_DF_updated.csv") # unweighted DF
+o <-read.csv("./Dataframes/d18O_volat_SPDfactor.csv") # O18 climate data + lags
+v <-read.csv("./Dataframes/Climate DFs/volatilty_quelccaya_d18O.csv") # O18 volatility data
+l <-read.csv("./Dataframes/Climate DFs/Geochemical parameters of Cerro Llamoca peatland.csv") # precip lithic proxy 
+p <-read.csv("./Dataframes/Climate DFs/Pollen of Cerro Llamoca peatland.csv") # precip pollen proxy 
+s <-read.csv("./Dataframes/SPD DFs/stacked_SPD.csv") # DF for stacked SPDs
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Order of operations: 1) SPDs, 2) Time-averaging variables with C14 distributions, 3) Models
+
+
+### 1) Generate SPD and unweighted DF
+
+```{r Drivers of Violence - SPD}
+
+## Generating a summed probability distribution (SPD) of the 149 C14 dates
+
+AllC14.caldates=calibrate(x=C14AgeSD_All$uncal_bp,errors=C14AgeSD_All$uncal_error,calCurves='shcal20',verbose=F) 
+AllC14.spd = spd(AllC14.caldates,timeRange=c(1300,450),runm=50,verbose=F) # generate SPD w/ 50 year smoothing window
+plot(AllC14.spd) 
+
+## Stacked SPD for 1) all individuals, 2) those with peri-mortem trauma (Y), 3) those without PMT (N)
+
+cal.s = calibrate(s$uncal_bp,s$uncal_error,normalised=FALSE,verbose=F)
+s.spd = spd(cal.s,timeRange=c(1200,450),verbose=F) 
+bins.s = binPrep(ages = s$uncal_bp, sites = s$id,h=0)
+cal.ss = calibrate(s$uncal_bp,s$uncal_error,normalised=FALSE,verbose=F)
+ss.spd = spd(cal.s,timeRange=c(1200,450),verbose=F) 
+ss.spd=stackspd(x=cal.s,group=s$id,timeRange=c(1200,450),bins=bins.s,runm=50,verbose=F)
+plot(ss.spd,type='stacked')
+plot(ss.spd,type='lines')
+plot(ss.spd,type='multipanel')
+
+# unweighted DF
+df<-data.frame(yearBP=AllC14.spd$grid$calBP,
+               spd=AllC14.spd$grid$PrDens,
+               peri_numeric=NA,
+               cribra=NA,
+               porotic=NA)
+
+names(df)
+
+
+
+```
+
+
+### 2) Time-averaging variables by C14 distributions
+
+```{r Drivers of Violence - Weights}
+
+par(mfrow=c(2,3))
+
+# peri-mortem trauma
+meanV<-data.frame(yearBP=AllC14.spd$grid$calBP)
+for (i in 1:nrow(C14all)){
+  dates<-calibrate(x=C14all$uncal_bp[i],errors=C14all$uncal_error[i],calCurves='shcal20',verbose=F)
+  x<-data.frame(yearBP=dates$grids$'1'$calBP,peri_numeric=C14all$peri_numeric[i]) 
+  meanV<-merge(meanV,x,by="yearBP",all=T)
+} 
+
+for (i in 1:nrow(meanV)){
+  test<-meanV[i,]
+  test<-t(test)
+  year<-test[1,]
+  test<-test[-1,]
+  meany<-mean(na.omit(test))
+  df[df$yearBP==year,3]<-meany
+}
+plot(df$yearBP, df$peri_numeric)
+
+
+# cribra orbitalia 
+meanV<-data.frame(yearBP=AllC14.spd$grid$calBP)
+for (i in 1:nrow(C14all)){
+  dates<-calibrate(x=C14all$uncal_bp[i],errors=C14all$uncal_error[i],calCurves='shcal20',verbose=F)
+  x<-data.frame(yearBP=dates$grids$'1'$calBP,cribra=C14all$cribra[i]) 
+  meanV<-merge(meanV,x,by="yearBP",all=T)
+}
+
+for (i in 1:nrow(meanV)){
+  test<-meanV[i,]
+  test<-t(test)
+  year<-test[1,]
+  test<-test[-1,]
+  meany<-mean(na.omit(test))
+  df[df$yearBP==year,4]<-meany
+}
+plot(df$cribra ~ df$yearBP)
+
+
+# porotic hyperostosis
+meanV<-data.frame(yearBP=AllC14.spd$grid$calBP)
+  for (i in 1:nrow(C14all)){
+  dates<-calibrate(x=C14all$uncal_bp[i],errors=C14all$uncal_error[i],calCurves='shcal20',verbose=F)
+  x<-data.frame(yearBP=dates$grids$'1'$calBP,porotic=C14all$porotic[i]) 
+  meanV<-merge(meanV,x,by="yearBP",all=T)
+  
+} 
+
+for (i in 1:nrow(meanV)){
+  test<-meanV[i,]
+  test<-t(test)
+  year<-test[1,]
+  test<-test[-1,]
+  meany<-mean(na.omit(test))
+  df[df$yearBP==year,5]<-meany 
+}
+plot(df$yearBP, df$porotic)
+
+# Change binary variables to 0 - 1
+df$peri_numeric = range01(df$peri_numeric)
+df$cribra = range01(df$cribra)
+df$porotic = range01(df$porotic)
+
+
+# Merge in pollen proxy climate data 
+df1<-merge(df,p[,c(2,3)],by="yearBP",all.x=T) # poaceae data first 
+##### df1 is the weighted DF ######
+write.csv(df1, file="./Dataframes/df1.csv")
+names(df1)
+head(df1)
+
+```
+
+
+### 3) Models
+
+```{r Drivers of Violence - Models}
+
+# compare colliniarity of initial predictors 
+cor.test(x=df1$poaceae_perc, y=df1$spd, method = 'spearman') # rho = 0.577
+
+### models include a resampling term to account for temporal autocorrelation
+
+# SPD
+mod1<-gam(peri_numeric~s(spd,k=4),data=df1[c(TRUE, rep(FALSE, 10)),],family=quasibinomial) # correlation=corAR1()
+summary(mod1) 
+# plot(mod1,shift=mod1$coefficients[1],scale=0,shade=T,shade.col=8,select=1,seWithMean=TRUE,ylab=NA,xlab="SPD");box()
+acf(resid(mod1), lag.max=100) 
+ggplot(df1, aes(spd, peri_numeric)) + geom_point(alpha = 0) + labs(x="SPD", y = 'Peri-mortem') + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x,k=4))
+
+
+# Poaceae % 
+mod2<-gam(peri_numeric~s(poaceae_perc),data=df1,family=quasibinomial) 
+summary(mod2) 
+acf(resid(mod2), lag.max=200) 
+# plot(mod2$gam,shift=mod2$gam$coefficients[1],shade=T,shade.col=8,select=1,seWithMean=TRUE,ylab=NA,xlab="Poaceae %");box()
+ggplot(df1, aes(poaceae_perc, peri_numeric)) + geom_point(alpha = 0) + labs(x="Poaceae %", y = 'Peri-mortem') + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# SPD + Poaceae % 
+mod2.1<-gam(peri_numeric~s(spd)+s(poaceae_perc),data=df1[c(TRUE, rep(FALSE, 0)),],family=quasibinomial) 
+summary(mod2.1) 
+acf(resid(mod2.1), lag.max=100) 
+# plot(mod2.1$gam,shift=mod2.1$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma",xlab="SPD");box()
+# plot(mod2.1$gam,shift=mod2.1$gam$coefficients[1],shade=T,select=2,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma",xlab="Poaceae");box()
+
+
+# porotic hyperostosis 
+mod2.2<-gamm(peri_numeric~s(porotic),data=df1[c(TRUE, rep(FALSE, 10)),],family=binomial) 
+summary(mod2.2$gam) 
+acf(resid(mod2.2$lme,type="normalized"), lag.max=200) 
+# plot(mod2.2$gam,shift=mod2.2$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA,xlab="PH");box()
+ggplot(df1, aes(porotic, peri_numeric)) + geom_point(alpha = 0) + labs(x="Porotic", y = 'Peri-mortem') + lims(x=c(0,0.9),y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# SPD + porotic
+mod2.3<-gamm(peri_numeric~s(spd)+s(porotic),data=df1[c(TRUE, rep(FALSE, 10)),],family=binomial) 
+summary(mod2.3$gam) 
+acf(resid(mod2.2$lme,type="normalized"), lag.max=200) 
+# plot(mod2.2$gam,shift=mod2.2$gam$coefficients[1],shade=T,select=2,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma",xlab="Porotic");box()
+
+
+# cribra orbitalia
+mod2.3<-gamm(peri_numeric~s(cribra),data=df1[c(TRUE, rep(FALSE, 10)),],family=quasibinomial) 
+summary(mod2.3$gam) 
+acf(resid(mod2.3$lme,type="normalized"), lag.max=200) 
+# plot(mod2.3$gam,shift=mod2.3$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA,xlab="CO");box()
+ggplot(df1, aes(cribra, peri_numeric)) + geom_point(alpha = 0) + labs(x="Cribra", y = 'Peri-mortem') + lims(x=c(0,1),y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# SPD + cribra orbitalia
+mod2.4<-gamm(peri_numeric~s(spd)+s(cribra),data=df1[c(TRUE, rep(FALSE, 10)),],family=quasibinomial) 
+summary(mod2.4$gam) 
+acf(resid(mod2.4$lme,type="normalized"), lag.max=200) 
+# plot(mod2.4$gam,shift=mod2.4$gam$coefficients[1],shade=T,select=2,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma",xlab="Porotic");box()
+
+
+# merge in climate data - 2nd lithic data 
+df1<-merge(df,l[,c(2,8)],by="yearBP",all.x=T) # lithic ratio climate data 
+
+# Mn_Fe ratio
+mod3<-gam(peri_numeric~s(Mn_Fe_ratio),data=df1[c(TRUE, rep(FALSE, 3)),],family=quasibinomial) 
+summary(mod3) 
+acf(resid(mod3), lag.max=200) 
+# plot(mod3$gam,shift=mod3$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA, xlab="Mn_Fe Ratio");box()
+ggplot(df1, aes(Mn_Fe_ratio, peri_numeric)) + geom_point(alpha = 0) + labs(x="Mn_Fe_ratio", y = 'Peri-mortem') + lims(y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# SPD + Mn_Fe ratio
+mod3.1<-gam(peri_numeric~s(spd)+s(Mn_Fe_ratio),data=df1[c(TRUE, rep(FALSE, 3)),],family=quasibinomial) 
+summary(mod3.1) 
+acf(resid(mod3.1), lag.max=200) 
+# plot(mod3.1$gam,shift=mod3.1$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma",xlab="SPD");box()
+# plot(mod3.1$gam,shift=mod3.1$gam$coefficients[1],shade=T,select=2,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma");box()
+
+
+# Merge in climate data - now O18
+df1<-merge(df,o[,c(2,3,5,6,7,8,9)],by="yearBP",all.x=T) # O18 Data
+names(df1)
+cor.test(x=df1$d18OiceSMOW, y=df1$spd, method='spearman') # rho = -0.0192715 
+
+# Icecap O18  
+mod4<-gam(peri_numeric~s(d18OiceSMOW),data=df1[c(TRUE, rep(FALSE, 20)),],family=quasibinomial) 
+summary(mod4) 
+acf(resid(mod4),lag.max=200) 
+# plot(mod4$gam,shift=mod4$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA, xlab="δ18O");box()
+ggplot(df1, aes(d18OiceSMOW, peri_numeric)) + geom_point(alpha = 0) + labs(x="Ice cap dO18", y = 'Peri-mortem') + lims(y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# SPD + O18  
+mod4<-gam(peri_numeric~s(spd,k=4)+s(d18OiceSMOW),data=df1[c(TRUE, rep(FALSE, 10)),],family=quasibinomial) 
+summary(mod4) 
+acf(resid(mod4),lag.max=200) 
+# plot(mod4$gam,shift=mod4$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma");box()
+# plot(mod4$gam,shift=mod4$gam$coefficients[1],shade=T,select=2,seWithMean=TRUE,ylab="Mean Peri-mortem Trauma");box()
+
+ 
+# O18 lags
+mod4.1<-gam(peri_numeric~s(lag_25yr),data=df1[c(TRUE, rep(FALSE, 25)),],family=quasibinomial) 
+summary(mod4.1) 
+acf(resid(mod4.1), lag.max=200) 
+# plot(mod4.1$gam,shift=mod4.1$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA);box()
+ggplot(df1, aes(lag_25yr, peri_numeric)) + geom_point(alpha = 0) + labs(x="lag 25yr", y = 'Peri-mortem') + lims(y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+mod4.2<-gam(peri_numeric~s(lag_50yr),data=df1[c(TRUE, rep(FALSE, 35)),],family=quasibinomial) 
+summary(mod4.2) 
+acf(resid(mod4.2), lag.max=200) 
+# plot(mod4.2$gam,shift=mod4.2$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA);box()
+ggplot(df1, aes(lag_50yr, peri_numeric)) + geom_point(alpha = 0) + labs(x="lag 50yr", y = 'Peri-mortem') + lims(y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+mod4.3<-gam(peri_numeric~s(lag_100yr),data=df1[c(TRUE, rep(FALSE, 20)),],family=quasibinomial) 
+summary(mod4.3) 
+acf(resid(mod4.3), lag.max=200) 
+# plot(mod4.3$gam,shift=mod4.3$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab=NA);box()
+ggplot(df1, aes(lag_100yr, peri_numeric)) + geom_point(alpha = 0) + labs(x="lag 100yr", y = 'Peri-mortem') + lims(y=c(0,1)) + theme_linedraw() + geom_smooth(method = "gam", color="black", formula = y ~s(x)) 
+
+# how do O18 lags differ?
+mod5<-gam(peri_numeric~s(d18OiceSMOW)+s(lag_25yr)+s(lag_50yr)+s(lag_100yr),data=df1[c(TRUE, rep(FALSE, 10)),],family=quasibinomial) 
+summary(mod5) # the different lags are not collinear. 
+acf(resid(mod5), lag.max=200) # looks good
+# plot(mod5$gam,shift=mod5$gam$coefficients[1],shade=T,select=1,seWithMean=TRUE,ylab="Weighted Peri-mortem Trauma");box()
+# plot(mod5$gam,shift=mod5$gam$coefficients[1],shade=T,select=2,seWithMean=TRUE,ylab="Weighted Peri-mortem Trauma");box()
+# plot(mod5$gam,shift=mod5$gam$coefficients[1],shade=T,select=3,seWithMean=TRUE,ylab="Weighted Peri-mortem Trauma");box()
+# plot(mod5$gam,shift=mod5$gam$coefficients[1],shade=T,select=4,seWithMean=TRUE,ylab="Weighted Peri-mortem Trauma");box()
+
+# plots for article 
+
+par(mfrow=c(3,3))
+# SPD
+ggplot(df1, aes(spd, peri_numeric)) + geom_point(alpha = 0) + labs(x="SPD", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x,k=4))
+
+# Poaceae %
+df1<-merge(df,p[,c(2,3)],by="yearBP",all.x=T)
+ggplot(df1, aes(poaceae_perc, peri_numeric)) + geom_point(alpha = 0) + labs(x="Poaceae %", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# Mn_Fe
+df1<-merge(df,l[,c(2,8)],by="yearBP",all.x=T)
+ggplot(df1, aes(Mn_Fe_ratio, peri_numeric)) + geom_point(alpha = 0) + labs(x="Mn_Fe Ratio", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# O18 
+df1<-merge(df,o[,c(2,3,5,6,7,8,9)],by="yearBP",all.x=T)
+ggplot(df1, aes(d18OiceSMOW, peri_numeric)) + geom_point(alpha = 0) + labs(x="Ice Cap δO18", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# 25 yr lag
+ggplot(df1, aes(lag_25yr, peri_numeric)) + geom_point(alpha = 0) + labs(x="δO18 25yr Lag", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# 50 yr lag
+ggplot(df1, aes(lag_50yr, peri_numeric)) + geom_point(alpha = 0) + labs(x="δO18 50yr Lag", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+# 100 yr lag 
+ggplot(df1, aes(lag_100yr, peri_numeric)) + geom_point(alpha = 0) + labs(x="δO18 100yr Lag", y = '') + theme_linedraw() + theme(axis.text=element_text(size=14,face='bold'),axis.title.x = element_text(size = 16,face='bold',margin=margin(t=15)),axis.title.y = element_text(size = 16,face='bold'),plot.margin = margin(0.25, 0.45, .25, 0, "cm")) + geom_smooth(method = "gam", color="black", formula = y ~s(x))
+
+
+
+
+
+```
+
+
